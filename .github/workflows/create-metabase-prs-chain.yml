@@ -122,15 +122,7 @@ jobs:
           git commit -m "(stg prd)本番環境にて動作確認が終了したため、スペックを元に戻す"
           git push origin "$spec_back_branch"
 
-          cat > /tmp/spec_back_body.md << 'SPEC_BACK_EOF'
-## 概要
-
-## 本番環境で確認したこと
-
-本番環境を問題なく閲覧できるか
-
-ECSタスクが問題なく起動しているか
-SPEC_BACK_EOF
+          printf '## 概要\n\n## 本番環境で確認したこと\n\n本番環境を問題なく閲覧できるか\n\nECSタスクが問題なく起動しているか\n' > /tmp/spec_back_body.md
 
           gh pr create \
             --draft \
