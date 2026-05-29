@@ -16,6 +16,8 @@ permissions:
 jobs:
   create-prs:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v6
@@ -67,8 +69,6 @@ jobs:
             echo "${TRANSLATED}"
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Branch-A (STG) and PR
         run: |
@@ -89,8 +89,6 @@ jobs:
             --title "Metabaseのversionをv${version}にアップデート(${stg_branch})" \
             --body "${{ steps.changelog.outputs.pr_body }}" \
             --assignee "${{ github.actor }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Branch-B (PRD) and PR
         run: |
@@ -110,8 +108,6 @@ jobs:
             --title "Metabaseのversionをv${version}にアップデート(${prd_branch})" \
             --body "${{ steps.changelog.outputs.pr_body }}" \
             --assignee "${{ github.actor }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Branch-C (Spec Back) and PR
         run: |
@@ -133,5 +129,3 @@ jobs:
             --title "(stg prd)本番環境にて動作確認が終了したため、スペックを元に戻す" \
             --body-file /tmp/spec_back_body.md \
             --assignee "${{ github.actor }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
