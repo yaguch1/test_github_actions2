@@ -1,0 +1,142 @@
+name: Metabase PRs Chain Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      metabase_version:
+        description: 'Example: 0.54.10'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  statuses: write
+
+jobs:
+  create-prs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install translate-shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y translate-shell
+
+      - name: Configure for Git
+        run: |
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config --global user.name 'github-actions[bot]'
+
+      - name: Set up variables
+        run: |
+          VERSION="${{ inputs.metabase_version }}"
+          STG_BRANCH="chore/metabase-${VERSION}-stg"
+          PRD_BRANCH="chore/metabase-${VERSION}"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          SPEC_BACK_BRANCH="metabase-spec-back-${TIMESTAMP}"
+
+          echo "version=$VERSION" >> "$GITHUB_ENV"
+          echo "stg_branch=$STG_BRANCH" >> "$GITHUB_ENV"
+          echo "prd_branch=$PRD_BRANCH" >> "$GITHUB_ENV"
+          echo "spec_back_branch=$SPEC_BACK_BRANCH" >> "$GITHUB_ENV"
+
+      - name: Generate translated changelog
+        id: changelog
+        run: |
+          RELEASE_NOTES=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/metabase/metabase/releases/tags/v${version}" \
+            --jq .body)
+
+          TRANSLATED=$(echo "${RELEASE_NOTES}" | trans -b en:ja)
+
+          delimiter="EOF_$(date +%s)"
+
+          {
+            echo "pr_body<<$delimiter"
+            echo "## 概要"
+            echo "https://github.com/metabase/metabase/releases/tag/v${version}"
+            echo ""
+            echo "## Changelog"
+            echo "${TRANSLATED}"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Branch-A (STG) and PR
+        run: |
+          git switch -c "$stg_branch"
+
+          sed -i "s/enable_bi = 0$/enable_bi = 1/" envs/stg/locals.tf
+          sed -i 's/bi_version_up_mode = false/bi_version_up_mode = true/' envs/stg/locals.tf
+          sed -i "s/metabase_image_tag = .*/metabase_image_tag = \"v${version}\"/" envs/stg/locals.tf
+
+          git add envs/stg/locals.tf
+          git commit -m "Update Metabase version to ${version}"
+          git push origin "$stg_branch" -f
+
+          gh pr create \
+            --draft \
+            --base main \
+            --head "$stg_branch" \
+            --title "Metabaseのversionをv${version}にアップデート(${stg_branch})" \
+            --body "${{ steps.changelog.outputs.pr_body }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Branch-B (PRD) and PR
+        run: |
+          git switch -c "$prd_branch"
+
+          sed -i 's/bi_version_up_mode = false/bi_version_up_mode = true/' envs/prd/locals.tf
+          sed -i "s/metabase_image_tag = .*/metabase_image_tag = \"v${version}\"/" envs/prd/locals.tf
+
+          git add envs/prd/locals.tf
+          git commit -m "Update Metabase version to ${version}"
+          git push origin "$prd_branch" -f
+
+          gh pr create \
+            --draft \
+            --base "$stg_branch" \
+            --head "$prd_branch" \
+            --title "Metabaseのversionをv${version}にアップデート(${prd_branch})" \
+            --body "${{ steps.changelog.outputs.pr_body }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Branch-C (Spec Back) and PR
+        run: |
+          git switch -c "$spec_back_branch"
+
+          sed -i 's/bi_version_up_mode = true/bi_version_up_mode = false/' envs/stg/locals.tf envs/prd/locals.tf
+          sed -i "s/enable_bi = 1/enable_bi = 0/" envs/stg/locals.tf
+
+          git add envs/stg/locals.tf envs/prd/locals.tf
+          git commit -m "(stg prd)本番環境にて動作確認が終了したため、スペックを元に戻す"
+          git push origin "$spec_back_branch"
+
+          cat > /tmp/spec_back_body.md << 'SPEC_BACK_EOF'
+## 概要
+
+## 本番環境で確認したこと
+
+本番環境を問題なく閲覧できるか
+
+ECSタスクが問題なく起動しているか
+SPEC_BACK_EOF
+
+          gh pr create \
+            --draft \
+            --base "$prd_branch" \
+            --head "$spec_back_branch" \
+            --title "(stg prd)本番環境にて動作確認が終了したため、スペックを元に戻す" \
+            --body-file /tmp/spec_back_body.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
