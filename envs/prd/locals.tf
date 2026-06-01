@@ -1,2 +1,2 @@
-bi_version_up_mode = false
-metabase_image_tag = "v0.59.3"
+bi_version_up_mode = true
+metabase_image_tag = "v0.59.6"
