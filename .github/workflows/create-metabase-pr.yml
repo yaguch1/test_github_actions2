@@ -1,0 +1,92 @@
+name: Metabase PR Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      metabase_version:
+        description: 'Example: 0.54.10'
+        required: true
+      target_file_path:
+        description: 'Path to the file to be modified'
+        default: 'envs/stg/locals.tf'
+        type: choice
+        options:
+          - 'envs/stg/locals.tf'
+          - 'envs/prd/locals.tf'
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  statuses: write
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install translate-shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y translate-shell
+
+      - name: Configure for Git
+        run: |
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config --global user.name 'github-actions[bot]'
+
+      - name: Set up variables
+        run: |
+          VERSION="${{ inputs.metabase_version }}"
+          FILE_PATH="${{ inputs.target_file_path }}"
+          BRANCH_NAME="chore/metabase-${VERSION}"
+          ENABLE_BI="false"
+
+          if [ "$FILE_PATH" == 'envs/stg/locals.tf' ]; then
+            BRANCH_NAME="${BRANCH_NAME}-stg"
+            ENABLE_BI="true"
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "file_path=$FILE_PATH"
+            echo "branch_name=$BRANCH_NAME"
+            echo "enable_bi=$ENABLE_BI"
+            echo "pr_title=Metabaseのversionをv${VERSION}にアップデート(${BRANCH_NAME})"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate translated changelog
+        run: |
+          RELEASE_NOTES=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/metabase/metabase/releases/tags/v${version}" \
+            --jq .body)
+
+          TRANSLATED=$(echo "${RELEASE_NOTES}" | trans -b en:ja)
+
+          {
+            echo "## 概要"
+            echo "https://github.com/metabase/metabase/releases/tag/v${version}"
+            echo ""
+            echo "## Changelog"
+            echo "${TRANSLATED}"
+          } > /tmp/changelog_body.md
+
+      - name: Create branch and PR
+        uses: ./.github/actions/create-metabase-pr
+        with:
+          version: ${{ env.version }}
+          branch_name: ${{ env.branch_name }}
+          base_branch: main
+          file_path: ${{ env.file_path }}
+          enable_bi: ${{ env.enable_bi }}
+          pr_title: ${{ env.pr_title }}
+          pr_body_file: /tmp/changelog_body.md
+          assignee: ${{ github.actor }}

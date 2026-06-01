@@ -43,13 +43,14 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           SPEC_BACK_BRANCH="metabase-spec-back-${TIMESTAMP}"
 
-          echo "version=$VERSION" >> "$GITHUB_ENV"
-          echo "stg_branch=$STG_BRANCH" >> "$GITHUB_ENV"
-          echo "prd_branch=$PRD_BRANCH" >> "$GITHUB_ENV"
-          echo "spec_back_branch=$SPEC_BACK_BRANCH" >> "$GITHUB_ENV"
+          {
+            echo "version=$VERSION"
+            echo "stg_branch=$STG_BRANCH"
+            echo "prd_branch=$PRD_BRANCH"
+            echo "spec_back_branch=$SPEC_BACK_BRANCH"
+          } >> "$GITHUB_ENV"
 
       - name: Generate translated changelog
-        id: changelog
         run: |
           RELEASE_NOTES=$(gh api \
             -H "Accept: application/vnd.github+json" \
@@ -58,56 +59,37 @@ jobs:
 
           TRANSLATED=$(echo "${RELEASE_NOTES}" | trans -b en:ja)
 
-          delimiter="EOF_$(date +%s)"
-
           {
-            echo "pr_body<<$delimiter"
             echo "## 概要"
             echo "https://github.com/metabase/metabase/releases/tag/v${version}"
             echo ""
             echo "## Changelog"
             echo "${TRANSLATED}"
-            echo "$delimiter"
-          } >> "$GITHUB_OUTPUT"
+          } > /tmp/changelog_body.md
 
       - name: Create Branch-A (STG) and PR
-        run: |
-          git switch -c "$stg_branch"
-
-          sed -i "s/enable_bi = 0$/enable_bi = 1/" envs/stg/locals.tf
-          sed -i 's/bi_version_up_mode = false/bi_version_up_mode = true/' envs/stg/locals.tf
-          sed -i "s/metabase_image_tag = .*/metabase_image_tag = \"v${version}\"/" envs/stg/locals.tf
-
-          git add envs/stg/locals.tf
-          git commit -m "Update Metabase version to ${version}"
-          git push origin "$stg_branch" -f
-
-          gh pr create \
-            --draft \
-            --base main \
-            --head "$stg_branch" \
-            --title "Metabaseのversionをv${version}にアップデート(${stg_branch})" \
-            --body "${{ steps.changelog.outputs.pr_body }}" \
-            --assignee "${{ github.actor }}"
+        uses: ./.github/actions/create-metabase-pr
+        with:
+          version: ${{ env.version }}
+          branch_name: ${{ env.stg_branch }}
+          base_branch: main
+          file_path: envs/stg/locals.tf
+          enable_bi: 'true'
+          pr_title: "Metabaseのversionをv${{ env.version }}にアップデート(${{ env.stg_branch }})"
+          pr_body_file: /tmp/changelog_body.md
+          assignee: ${{ github.actor }}
 
       - name: Create Branch-B (PRD) and PR
-        run: |
-          git switch -c "$prd_branch"
-
-          sed -i 's/bi_version_up_mode = false/bi_version_up_mode = true/' envs/prd/locals.tf
-          sed -i "s/metabase_image_tag = .*/metabase_image_tag = \"v${version}\"/" envs/prd/locals.tf
-
-          git add envs/prd/locals.tf
-          git commit -m "Update Metabase version to ${version}"
-          git push origin "$prd_branch" -f
-
-          gh pr create \
-            --draft \
-            --base "$stg_branch" \
-            --head "$prd_branch" \
-            --title "Metabaseのversionをv${version}にアップデート(${prd_branch})" \
-            --body "${{ steps.changelog.outputs.pr_body }}" \
-            --assignee "${{ github.actor }}"
+        uses: ./.github/actions/create-metabase-pr
+        with:
+          version: ${{ env.version }}
+          branch_name: ${{ env.prd_branch }}
+          base_branch: ${{ env.stg_branch }}
+          file_path: envs/prd/locals.tf
+          enable_bi: 'false'
+          pr_title: "Metabaseのversionをv${{ env.version }}にアップデート(${{ env.prd_branch }})"
+          pr_body_file: /tmp/changelog_body.md
+          assignee: ${{ github.actor }}
 
       - name: Create Branch-C (Spec Back) and PR
         run: |

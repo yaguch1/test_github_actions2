@@ -1,0 +1,65 @@
+name: Create Metabase Version Update PR
+description: Creates a branch, updates Metabase version in locals.tf, and creates a draft PR
+
+inputs:
+  version:
+    description: 'Metabase version (e.g. 0.59.4)'
+    required: true
+  branch_name:
+    description: 'Branch name to create'
+    required: true
+  base_branch:
+    description: 'Base branch for the PR'
+    required: true
+  file_path:
+    description: 'Path to the locals.tf file to update'
+    required: true
+  enable_bi:
+    description: 'Whether to update enable_bi 0→1 (stg only)'
+    required: false
+    default: 'false'
+  pr_title:
+    description: 'PR title'
+    required: true
+  pr_body_file:
+    description: 'Path to file containing PR body'
+    required: true
+  assignee:
+    description: 'GitHub username to assign'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Create branch, update version, and create PR
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BRANCH_NAME: ${{ inputs.branch_name }}
+        INPUT_BASE_BRANCH: ${{ inputs.base_branch }}
+        INPUT_FILE_PATH: ${{ inputs.file_path }}
+        INPUT_ENABLE_BI: ${{ inputs.enable_bi }}
+        INPUT_PR_TITLE: ${{ inputs.pr_title }}
+        INPUT_PR_BODY_FILE: ${{ inputs.pr_body_file }}
+        INPUT_ASSIGNEE: ${{ inputs.assignee }}
+      run: |
+        git switch -c "$INPUT_BRANCH_NAME"
+
+        if [ "$INPUT_ENABLE_BI" = "true" ]; then
+          sed -i "s/enable_bi = 0$/enable_bi = 1/" "$INPUT_FILE_PATH"
+        fi
+
+        sed -i 's/bi_version_up_mode = false/bi_version_up_mode = true/' "$INPUT_FILE_PATH"
+        sed -i "s/metabase_image_tag = .*/metabase_image_tag = \"v${INPUT_VERSION}\"/" "$INPUT_FILE_PATH"
+
+        git add "$INPUT_FILE_PATH"
+        git commit -m "Update Metabase version to ${INPUT_VERSION}"
+        git push origin "$INPUT_BRANCH_NAME"
+
+        gh pr create \
+          --draft \
+          --base "$INPUT_BASE_BRANCH" \
+          --head "$INPUT_BRANCH_NAME" \
+          --title "$INPUT_PR_TITLE" \
+          --body-file "$INPUT_PR_BODY_FILE" \
+          --assignee "$INPUT_ASSIGNEE"
